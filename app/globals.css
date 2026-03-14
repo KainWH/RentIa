@@ -1,0 +1,10 @@
+/* Estas 3 líneas activan Tailwind CSS en toda la app */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Variables CSS globales - aquí definiremos colores del tema */
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+}
