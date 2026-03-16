@@ -77,7 +77,7 @@ export default function ConversationList({
     .slice(0, 6)
 
   return (
-    <div className="h-full bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-800/60 overflow-hidden flex flex-col">
+    <div className="h-full flex flex-col bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-800/60 overflow-hidden">
 
       {/* Header */}
       <div className="px-5 py-4 border-b border-slate-800/60 flex items-center justify-between gap-3">
@@ -107,7 +107,7 @@ export default function ConversationList({
       </div>
 
       {/* Lista */}
-      <div className="divide-y divide-slate-800/40 flex-1">
+      <div className="divide-y divide-slate-800/40 flex-1 overflow-y-auto">
         {open.length === 0 ? (
           <div className="py-12 flex flex-col items-center gap-2 text-slate-600">
             <Bot size={26} strokeWidth={1.5} />
