@@ -75,17 +75,17 @@ export default async function DashboardPage() {
   const ordersSparkline = [0, pendingOrders ?? 0]
 
   return (
-    <div className="p-6 flex flex-col gap-6 max-w-7xl h-full">
+    <div className="h-full flex flex-col overflow-hidden">
 
       {/* ── Alerta setup ── */}
       {!isSetupDone && (
-        <div className="flex items-center gap-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4">
-          <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900 flex items-center justify-center shrink-0">
-            <span className="text-lg">⚠️</span>
+        <div className="mx-6 mt-6 flex items-center gap-4 bg-amber-900/20 border border-amber-800 rounded-2xl p-4 shrink-0">
+          <div className="w-8 h-8 rounded-xl bg-amber-900/50 flex items-center justify-center shrink-0">
+            <span>⚠️</span>
           </div>
           <div className="flex-1">
-            <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">Tu agente no está activo</p>
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
+            <p className="text-sm font-semibold text-amber-300">Tu agente no está activo</p>
+            <p className="text-xs text-amber-400 mt-0.5">
               {!waConfig?.is_configured ? "Conecta WhatsApp Business para empezar a recibir mensajes." : "Activa el agente de IA en Configuración."}
             </p>
           </div>
@@ -96,7 +96,7 @@ export default async function DashboardPage() {
       )}
 
       {/* ── Métricas ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="px-6 pt-6 pb-0 grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
         <MetricCard
           label="Conversaciones"
           value={convsToday ?? 0}
@@ -137,22 +137,23 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* ── Contenido principal ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 flex-1 min-h-0 items-stretch">
+      {/* ── Contenido principal — ocupa todo el resto ── */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5 gap-5 p-6">
 
-        {/* Conversaciones — 3/5 */}
-        <div className="lg:col-span-3 h-full min-h-0">
+        {/* Chat — 3/5 */}
+        <div className="lg:col-span-3 min-h-0 overflow-hidden">
           <ConversationList conversations={(conversations ?? []) as any} />
         </div>
 
-        {/* Panel derecho — 2/5: grid de 2 filas, QuickActions fijo + ProductList llena el resto */}
-        <div className="lg:col-span-2 grid grid-rows-[auto_1fr] gap-5 min-h-0">
+        {/* Panel derecho — 2/5 */}
+        <div className="lg:col-span-2 min-h-0 grid gap-5" style={{ gridTemplateRows: "auto 1fr" }}>
           <QuickActions />
-          <ProductList products={(products ?? []) as any} />
+          <div className="min-h-0 overflow-hidden">
+            <ProductList products={(products ?? []) as any} />
+          </div>
         </div>
 
       </div>
-
     </div>
   )
 }
