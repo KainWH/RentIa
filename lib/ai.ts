@@ -43,19 +43,15 @@ export async function describeImage(buffer: Buffer, mimeType: string): Promise<s
 const JSON_FORMAT_INSTRUCTION = `
 
 FORMATO DE RESPUESTA OBLIGATORIO — responde SIEMPRE con este JSON en una sola línea, sin markdown ni texto fuera:
-{"reply":"mensaje al cliente","product_name":null,"purchase_detected":false,"client_summary":""}
+{"reply":"mensaje al cliente","product_name":null}
 
 Reglas:
 - reply: tu mensaje al cliente.
-- product_name: si el cliente pide ver la foto de un producto, escribe el nombre exacto del modelo como aparece en los datos (ej: "Samsung Galaxy A07"). Pon null si no aplica. NO pongas URLs ni rutas de archivo.
-- purchase_detected: pon true si el cliente dice que ya pagó, envió transferencia, o manda un comprobante de pago.
-- client_summary: si purchase_detected es true, escribe un resumen breve: producto comprado, monto, nombre del cliente. Si no aplica, deja "".`
+- product_name: si el cliente pide ver la foto de un producto o estás describiendo uno específico, escribe el nombre exacto del modelo como aparece en los datos (ej: "Samsung Galaxy A07"). Pon null si no aplica. NO pongas URLs ni rutas de archivo.`
 
 export type AIReply = {
-  reply:             string
-  productName:       string | null
-  purchaseDetected:  boolean
-  clientSummary:     string
+  reply:       string
+  productName: string | null
 }
 
 export async function generateReply({
@@ -86,7 +82,7 @@ export async function generateReply({
 
   if (!raw) {
     console.warn("⚠️ Gemini devolvió respuesta vacía")
-    return { reply: "", productName: null, purchaseDetected: false, clientSummary: "" }
+    return { reply: "", productName: null }
   }
 
   // Gemini a veces alucina un "tool_code" de Drive — extraemos el nombre del producto del filename
@@ -94,28 +90,26 @@ export async function generateReply({
     const fileMatch = raw.match(/file_name=['"]([^'"]+)['"]/)
     if (fileMatch) {
       const productName = fileMatch[1]
-        .replace(/\.[^.]+$/, "")   // quitar extensión
-        .replace(/[-_]/g, " ")     // guiones → espacios
+        .replace(/\.[^.]+$/, "")
+        .replace(/[-_]/g, " ")
         .replace(/\s+/g, " ")
         .trim()
       console.warn(`⚠️ Gemini usó tool_code — extrayendo producto: "${productName}"`)
-      return { reply: "", productName, purchaseDetected: false, clientSummary: "" }
+      return { reply: "", productName }
     }
     console.warn("⚠️ Gemini usó tool_code pero no se pudo extraer el producto")
-    return { reply: "", productName: null, purchaseDetected: false, clientSummary: "" }
+    return { reply: "", productName: null }
   }
 
   try {
     const cleaned = raw.replace(/^```json\s*/i, "").replace(/\s*```$/, "")
     const parsed  = JSON.parse(cleaned)
     return {
-      reply:            (parsed.reply ?? "").trim(),
-      productName:      parsed.product_name && parsed.product_name !== "null" ? parsed.product_name : null,
-      purchaseDetected: parsed.purchase_detected === true,
-      clientSummary:    parsed.client_summary ?? "",
+      reply:       (parsed.reply ?? "").trim(),
+      productName: parsed.product_name && parsed.product_name !== "null" ? parsed.product_name : null,
     }
   } catch {
     console.warn("⚠️ Gemini no devolvió JSON válido, usando texto plano")
-    return { reply: raw, productName: null, purchaseDetected: false, clientSummary: "" }
+    return { reply: raw, productName: null }
   }
 }
