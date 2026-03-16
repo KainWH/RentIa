@@ -8,9 +8,6 @@ import { generateReply, transcribeAudio, describeImage } from "@/lib/ai"
 import { sendWhatsAppMessage, sendWhatsAppMedia, uploadMedia, markAsRead, downloadMedia } from "@/lib/whatsapp"
 import { getPropertyData, findImageUrl } from "@/lib/sheets"
 
-// Número del dueño — recibe notificaciones de compras y aprueba pagos
-const OWNER_PHONE = process.env.OWNER_PHONE ?? ""
-
 // Deduplicación en memoria — evita reprocesar si Meta reenvía el webhook
 const recentlyProcessed = new Set<string>()
 function isAlreadyProcessed(msgId: string): boolean {
@@ -113,9 +110,6 @@ export async function POST(request: NextRequest) {
   let textForDB  = textForAI
   let messageType = "text"
   let inboundMediaId: string | null = null
-  // Buffer de la imagen entrante (para reenviar al dueño si es voucher)
-  let inboundImageBuffer: Buffer | null   = null
-  let inboundImageMime:   string | null   = null
 
   const isAudio = message.type === "audio" || message.type === "voice"
   const audioId = message.audio?.id ?? message.voice?.id
@@ -145,9 +139,7 @@ export async function POST(request: NextRequest) {
       textForAI = "El usuario envió una imagen (no se pudo procesar)"
       textForDB = "🖼️ Imagen"
     } else {
-      inboundImageBuffer = media.buffer
-      inboundImageMime   = media.mimeType
-      const description  = await describeImage(media.buffer, media.mimeType)
+      const description = await describeImage(media.buffer, media.mimeType)
       textForAI = description
         ? `El usuario envió una imagen. Descripción: ${description}`
         : "El usuario envió una imagen"
@@ -272,76 +264,7 @@ export async function POST(request: NextRequest) {
     await sendImageToPhone(buffer, mimeType, to)
   }
 
-  // ── PASO 7: Manejar mensajes del DUEÑO ──
-  // Si el mensaje viene del dueño, procesar confirmación/rechazo de pagos
-  if (OWNER_PHONE && from === OWNER_PHONE) {
-    const text       = textForAI.toLowerCase().trim()
-    const isConfirm  = text.includes("confirmar") || text === "si" || text === "sí" || text === "ok" || text === "aprobado"
-    const isReject   = text.includes("rechazar") || text === "no" || text.includes("cancelar")
-
-    if (isConfirm || isReject) {
-      // Buscar conversación de cliente esperando aprobación
-      const { data: pendingConvs } = await supabase
-        .from("conversations")
-        .select("id, contact_id, approval_client_info")
-        .eq("tenant_id", tenantId)
-        .eq("awaiting_approval", true)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-
-      const pending = pendingConvs?.[0]
-
-      if (pending) {
-        const { data: clientContact } = await supabase
-          .from("contacts")
-          .select("phone")
-          .eq("id", pending.contact_id)
-          .single()
-
-        if (clientContact) {
-          const clientMsg = isConfirm
-            ? "¡Tu pago fue confirmado exitosamente! ✅ Tu pedido está en proceso. ¡Gracias por tu compra! 🎉"
-            : "Lo sentimos, no pudimos verificar tu pago. 😕 Por favor contáctanos para más información o intenta nuevamente."
-
-          await sendWhatsAppMessage({
-            to:            clientContact.phone,
-            message:       clientMsg,
-            phoneNumberId: whatsappConfig.phone_number_id!,
-            accessToken:   whatsappConfig.access_token!,
-          })
-
-          await supabase.from("conversations")
-            .update({ awaiting_approval: false, approval_client_info: null })
-            .eq("id", pending.id)
-
-          const ownerAck = isConfirm
-            ? `✅ Pago confirmado. Cliente notificado.`
-            : `❌ Pago rechazado. Cliente notificado.`
-
-          await sendWhatsAppMessage({
-            to:            OWNER_PHONE,
-            message:       ownerAck,
-            phoneNumberId: whatsappConfig.phone_number_id!,
-            accessToken:   whatsappConfig.access_token!,
-          })
-
-          console.log(`✅ Confirmación del dueño procesada: ${isConfirm ? "APROBADO" : "RECHAZADO"} → ${clientContact.phone}`)
-        }
-      } else {
-        await sendWhatsAppMessage({
-          to:            OWNER_PHONE,
-          message:       "No hay pagos pendientes de confirmación.",
-          phoneNumberId: whatsappConfig.phone_number_id!,
-          accessToken:   whatsappConfig.access_token!,
-        })
-      }
-    }
-
-    // No generar respuesta IA para mensajes del dueño
-    return NextResponse.json({ status: "ok" }, { status: 200 })
-  }
-
-  // ── PASO 8: Respuesta automática con IA ──
+  // ── PASO 7: Respuesta automática con IA ──
   const { data: aiConfig } = await supabase
     .from("ai_configs")
     .select("enabled, system_prompt")
@@ -404,14 +327,14 @@ export async function POST(request: NextRequest) {
   let aiReply: Awaited<ReturnType<typeof generateReply>>
   try {
     aiReply = await generateReply({ userMessage: textForAI, systemPrompt, conversationHistory: history })
-    console.log(`🤖 generateReply → reply="${aiReply.reply.substring(0, 100)}", product="${aiReply.productName}", purchase=${aiReply.purchaseDetected}`)
+    console.log(`🤖 generateReply → reply="${aiReply.reply.substring(0, 100)}", product="${aiReply.productName}"`)
   } catch (err) {
     console.error("❌ Error generando respuesta con IA:", err)
     await sendFallback()
     return NextResponse.json({ status: "ok" }, { status: 200 })
   }
 
-  const { reply, productName, purchaseDetected, clientSummary } = aiReply
+  const { reply, productName } = aiReply
 
   // ── Enviar imagen del producto si el AI lo indicó ──
   if (productName) {
@@ -458,57 +381,6 @@ export async function POST(request: NextRequest) {
   } else if (!productName) {
     // No hubo imagen ni texto — enviar fallback
     await sendFallback()
-  }
-
-  // ── Notificar al dueño si se detectó una compra ──
-  if (purchaseDetected && OWNER_PHONE) {
-    try {
-      const clientDisplayName = contactName || from
-      const summary = clientSummary || `Cliente: ${clientDisplayName}\nTeléfono: ${from}`
-
-      const ownerMsg =
-        `🛒 *Nueva compra detectada*\n\n` +
-        `${summary}\n\n` +
-        `📱 WhatsApp del cliente: +${from}\n\n` +
-        `_Responde *CONFIRMAR* o *RECHAZAR* para notificar al cliente._`
-
-      await sendWhatsAppMessage({
-        to:            OWNER_PHONE,
-        message:       ownerMsg,
-        phoneNumberId: whatsappConfig.phone_number_id!,
-        accessToken:   whatsappConfig.access_token!,
-      })
-
-      // Si el cliente envió un voucher (imagen), reenviarlo al dueño
-      if (inboundImageBuffer && inboundImageMime) {
-        await sendImageToPhone(inboundImageBuffer, inboundImageMime, OWNER_PHONE)
-        console.log(`📤 Voucher del cliente reenviado al dueño`)
-      }
-
-      // Marcar conversación como esperando aprobación
-      await supabase.from("conversations")
-        .update({ awaiting_approval: true, approval_client_info: summary })
-        .eq("id", conversationId)
-
-      // Avisarle al cliente que estamos verificando
-      const verifyMsg = "Estamos verificando tu pago. En breve te confirmamos. ✅"
-      await sendWhatsAppMessage({
-        to:            from,
-        message:       verifyMsg,
-        phoneNumberId: whatsappConfig.phone_number_id!,
-        accessToken:   whatsappConfig.access_token!,
-      })
-      await supabase.from("messages").insert({
-        conversation_id: conversationId,
-        content:         verifyMsg,
-        direction:       "outbound",
-        sent_by_ai:      true,
-      })
-
-      console.log(`💰 Compra detectada — dueño notificado (${OWNER_PHONE})`)
-    } catch (err) {
-      console.error("❌ Error notificando al dueño:", err)
-    }
   }
 
   return NextResponse.json({ status: "ok" }, { status: 200 })
