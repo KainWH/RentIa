@@ -1,5 +1,3 @@
-"use client"
-
 import { TrendingUp, TrendingDown, LucideIcon } from "lucide-react"
 
 type Props = {
