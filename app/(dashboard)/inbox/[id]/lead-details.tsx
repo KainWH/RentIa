@@ -23,7 +23,7 @@ export default function LeadDetails({ displayName, phone, avatarColor, aiPaused,
   const initials = displayName.slice(0, 2).toUpperCase()
 
   return (
-    <div className="hidden lg:flex w-72 shrink-0 border-l border-slate-800/60 bg-slate-900/50 flex-col overflow-y-auto">
+    <div className="flex w-full lg:w-72 shrink-0 border-l border-slate-800/60 bg-slate-900 flex-col overflow-y-auto h-full">
 
       {/* Perfil */}
       <div className="p-5 border-b border-slate-800/60 text-center">

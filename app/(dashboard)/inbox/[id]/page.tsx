@@ -1,9 +1,9 @@
 import { createClient } from "@/lib/supabase/server"
 import { redirect, notFound } from "next/navigation"
-import MessagesView        from "./messages-view"
-import ConversationHeader  from "./conversation-header"
-import MessageInput        from "./message-input"
-import LeadDetails         from "./lead-details"
+import MessagesView          from "./messages-view"
+import MessageInput          from "./message-input"
+import LeadDetails           from "./lead-details"
+import ConversationShell     from "./conversation-shell"
 
 function getAvatarColor(seed: string): string {
   const colors = ["#16a34a", "#2563eb", "#9333ea", "#ea580c", "#0891b2", "#be185d", "#ca8a04", "#dc2626"]
@@ -63,40 +63,34 @@ export default async function ConversationPage({ params }: { params: { id: strin
   }
 
   return (
-    <>
-      {/* ── Panel central — Chat ── */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-950">
-        <ConversationHeader
-          conversationId={conversation.id}
+    <ConversationShell
+      conversationId={conversation.id}
+      displayName={displayName}
+      phone={contact?.phone ?? ""}
+      status={conversation.status}
+      aiPaused={conversation.ai_paused ?? false}
+      avatarColor={avatarColor}
+      leadDetails={
+        <LeadDetails
           displayName={displayName}
           phone={contact?.phone ?? ""}
-          status={conversation.status}
-          aiPaused={conversation.ai_paused ?? false}
           avatarColor={avatarColor}
+          aiPaused={conversation.ai_paused ?? false}
+          status={conversation.status}
+          conversationId={conversation.id}
+          referral={referralData}
         />
-
-        <div className="flex-1 overflow-y-auto">
-          <MessagesView
-            messages={messages ?? []}
-            avatarColor={avatarColor}
-            contactInitial={displayName[0].toUpperCase()}
-            conversationId={conversation.id}
-          />
-        </div>
-
-        <MessageInput conversationId={conversation.id} />
+      }
+    >
+      <div className="flex-1 overflow-y-auto">
+        <MessagesView
+          messages={messages ?? []}
+          avatarColor={avatarColor}
+          contactInitial={displayName[0].toUpperCase()}
+          conversationId={conversation.id}
+        />
       </div>
-
-      {/* ── Panel derecho — Lead details ── */}
-      <LeadDetails
-        displayName={displayName}
-        phone={contact?.phone ?? ""}
-        avatarColor={avatarColor}
-        aiPaused={conversation.ai_paused ?? false}
-        status={conversation.status}
-        conversationId={conversation.id}
-        referral={referralData}
-      />
-    </>
+      <MessageInput conversationId={conversation.id} />
+    </ConversationShell>
   )
 }
