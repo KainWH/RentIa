@@ -1,7 +1,9 @@
-import { Phone, Calendar, Bot, PauseCircle, UserCheck } from "lucide-react"
+import { Phone, Calendar, Bot, PauseCircle, UserCheck, Megaphone } from "lucide-react"
 import Link from "next/link"
 import ProductSearch from "./product-search"
 import SendLocationButton from "./send-location-button"
+
+type ReferralData = { headline: string; platform: string; image_url: string | null }
 
 type Props = {
   displayName:    string
@@ -10,13 +12,14 @@ type Props = {
   aiPaused:       boolean
   status:         string
   conversationId: string
+  referral?:      ReferralData | null
 }
 
 const QUICK_ACTIONS = [
   { label: "Agendar visita", icon: Calendar, color: "text-blue-400", bg: "bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20" },
 ]
 
-export default function LeadDetails({ displayName, phone, avatarColor, aiPaused, status, conversationId }: Props) {
+export default function LeadDetails({ displayName, phone, avatarColor, aiPaused, status, conversationId, referral }: Props) {
   const initials = displayName.slice(0, 2).toUpperCase()
 
   return (
@@ -84,6 +87,31 @@ export default function LeadDetails({ displayName, phone, avatarColor, aiPaused,
           </div>
         </div>
       </div>
+
+      {/* Origen del anuncio */}
+      {referral && (
+        <div className="p-4 border-b border-slate-800/60">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 mb-3">Origen del cliente</p>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 overflow-hidden">
+            {referral.image_url && (
+              <img
+                src={referral.image_url}
+                alt={referral.headline}
+                className="w-full h-32 object-cover"
+              />
+            )}
+            <div className="p-3 flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <Megaphone size={11} className="text-amber-400 shrink-0" />
+                <span className="text-[10px] font-semibold uppercase tracking-widest text-amber-500">
+                  {referral.platform}
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-slate-200 leading-snug">{referral.headline}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* IA Quick Actions */}
       <div className="p-4">

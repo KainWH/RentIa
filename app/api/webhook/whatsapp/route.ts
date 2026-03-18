@@ -261,11 +261,21 @@ async function processWebhookMessage(body: any) {
       await supabase.from("contacts").update({ notes: updatedNotes }).eq("id", contact.id)
       console.log(`📣 Cliente de anuncio "${referral.headline}" — nota guardada para ${from}`)
 
+      // Detectar plataforma de origen
+      const sourceUrl  = referral.source_url ?? ""
+      const platform   = sourceUrl.includes("instagram") ? "Instagram"
+                       : sourceUrl.includes("facebook")  ? "Facebook"
+                       : "Meta Ads"
+
       // Insertar banner de origen en el chat (siempre, con o sin imagen)
       const chatMessages: object[] = [
         {
           conversation_id: conversationId,
-          content:         referral.headline,
+          content:         JSON.stringify({
+            headline:  referral.headline,
+            platform,
+            image_url: referral.image_url ?? null,
+          }),
           direction:       "inbound",
           sent_by_ai:      false,
           message_type:    "referral",
@@ -417,6 +427,9 @@ async function processWebhookMessage(body: any) {
   const adHeadline = referral?.headline
     ?? contactNotes?.match(/\[Origen: Anuncio "([^"]+)"/)?.[1]
     ?? null
+
+  console.log(`📣 adHeadline="${adHeadline}"`)
+
 
   const referralContext = adHeadline
     ? `\n\nCONTEXTO DE ORIGEN: Este cliente llegó haciendo clic en un anuncio de Instagram sobre "${adHeadline}". Su primer mensaje ("Hello! Can I get more info on this?" u otro similar) se refiere DIRECTAMENTE a ese producto. NUNCA le preguntes a qué producto se refiere — ya sabes que es "${adHeadline}". Respóndele de inmediato con información sobre ese producto.`
