@@ -238,7 +238,7 @@ export default function ContactsTable({ leads: initial, tenantId }: { leads: Lea
           </div>
 
           {/* Filters */}
-          <div className="flex gap-1 bg-slate-800/60 border border-slate-800/60 rounded-xl p-1">
+          <div className="flex gap-1 bg-slate-800/60 border border-slate-800/60 rounded-xl p-1 overflow-x-auto shrink-0">
             {FILTER_LABELS.map(([val, label]) => (
               <button
                 key={val}

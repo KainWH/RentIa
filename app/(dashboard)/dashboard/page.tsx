@@ -75,7 +75,7 @@ export default async function DashboardPage() {
   const ordersSparkline = [0, pendingOrders ?? 0]
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="flex flex-col">
 
       {/* ── Alerta setup ── */}
       {!isSetupDone && (
