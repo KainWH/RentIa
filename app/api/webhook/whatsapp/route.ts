@@ -250,7 +250,7 @@ async function processWebhookMessage(body: any) {
     conversationId    = newConversation.id
     isNewConversation = true
 
-    // Si el cliente llegó desde un anuncio, guardar nota + imagen
+    // Si el cliente llegó desde un anuncio, guardar nota + banner en el chat
     if (referral?.headline) {
       const adNote = `[Origen: Anuncio "${referral.headline}"${referral.source_id ? ` (ID: ${referral.source_id})` : ""}]`
       const { data: currentContact } = await supabase
@@ -261,25 +261,27 @@ async function processWebhookMessage(body: any) {
       await supabase.from("contacts").update({ notes: updatedNotes }).eq("id", contact.id)
       console.log(`📣 Cliente de anuncio "${referral.headline}" — nota guardada para ${from}`)
 
+      // Insertar banner de origen en el chat (siempre, con o sin imagen)
+      const chatMessages: object[] = [
+        {
+          conversation_id: conversationId,
+          content:         referral.headline,
+          direction:       "inbound",
+          sent_by_ai:      false,
+          message_type:    "referral",
+        },
+      ]
       if (referral.image_url) {
-        await supabase.from("messages").insert([
-          {
-            conversation_id: conversationId,
-            content:         `📣 Anuncio: "${referral.headline}"`,
-            direction:       "inbound",
-            sent_by_ai:      false,
-            message_type:    "text",
-          },
-          {
-            conversation_id: conversationId,
-            content:         referral.image_url,
-            direction:       "inbound",
-            sent_by_ai:      false,
-            message_type:    "image",
-          },
-        ])
-        console.log(`🖼️ Imagen del anuncio guardada en el chat para ${from}`)
+        chatMessages.push({
+          conversation_id: conversationId,
+          content:         referral.image_url,
+          direction:       "inbound",
+          sent_by_ai:      false,
+          message_type:    "image",
+        })
       }
+      await supabase.from("messages").insert(chatMessages)
+      console.log(`📣 Banner de anuncio "${referral.headline}" guardado en el chat para ${from}`)
     }
   }
 
@@ -417,7 +419,7 @@ async function processWebhookMessage(body: any) {
     ?? null
 
   const referralContext = adHeadline
-    ? `\n\nCONTEXTO DE ORIGEN: Este cliente llegó haciendo clic en el anuncio "${adHeadline}". IMPORTANTE: si el cliente dice "esto", "eso", "lo del anuncio", "quiero eso" o cualquier expresión vaga, asume que se refiere al producto de ese anuncio. No le preguntes a qué se refiere — respóndele directamente sobre ese producto.`
+    ? `\n\nCONTEXTO DE ORIGEN: Este cliente llegó haciendo clic en un anuncio de Instagram sobre "${adHeadline}". Su primer mensaje ("Hello! Can I get more info on this?" u otro similar) se refiere DIRECTAMENTE a ese producto. NUNCA le preguntes a qué producto se refiere — ya sabes que es "${adHeadline}". Respóndele de inmediato con información sobre ese producto.`
     : ""
 
   const systemPrompt = history.length > 0
