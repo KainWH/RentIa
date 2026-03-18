@@ -84,7 +84,7 @@ export default function CatalogGrid({ products: initial, waConnected }: Props) {
     <div className="flex flex-col gap-4">
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
           value={search}
