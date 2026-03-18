@@ -36,7 +36,7 @@ export default async function CatalogPage() {
   const waConnected   = !!(waCatalogId && waConfig?.access_token)
 
   return (
-    <div className="flex-1 overflow-auto p-6">
+    <div className="p-6">
       <div className="max-w-3xl flex flex-col gap-5">
 
         {/* Header */}
