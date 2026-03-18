@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { MapPin } from "lucide-react"
+import { MapPin, Megaphone } from "lucide-react"
 
 type Message = {
   id:            string
@@ -74,6 +74,29 @@ export default function MessagesView({ messages: initial, avatarColor, contactIn
         const dateLabel   = formatDateLabel(msg.created_at)
         const showDate    = dateLabel !== lastDateLabel
         lastDateLabel     = dateLabel
+
+        // Banner especial para mensajes de origen de anuncio
+        if (msg.message_type === "referral") {
+          return (
+            <div key={msg.id}>
+              {showDate && (
+                <div className="flex items-center gap-3 my-4">
+                  <div className="flex-1 h-px bg-slate-800/60" />
+                  <span className="text-[11px] text-slate-600 font-medium bg-slate-900 px-3 py-1 rounded-full border border-slate-800/60">
+                    {dateLabel}
+                  </span>
+                  <div className="flex-1 h-px bg-slate-800/60" />
+                </div>
+              )}
+              <div className="flex justify-center my-3">
+                <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium px-4 py-2 rounded-full">
+                  <Megaphone size={12} />
+                  <span>Cliente desde anuncio: <span className="font-bold">{msg.content}</span></span>
+                </div>
+              </div>
+            </div>
+          )
+        }
 
         return (
           <div key={msg.id}>
