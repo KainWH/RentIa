@@ -3,17 +3,28 @@
 import { useState } from "react"
 import type { WhatsappConfig } from "@/types"
 
+type VerifyResult = {
+  ok: boolean
+  displayPhoneNumber?: string
+  verifiedName?: string
+  qualityRating?: string
+  error?: string
+}
+
 export default function WhatsappForm({ config }: { config: WhatsappConfig | null }) {
   const [phoneNumberId, setPhoneNumberId] = useState(config?.phone_number_id ?? "")
   const [accessToken, setAccessToken]     = useState("")
-  const [status, setStatus]   = useState<"idle" | "loading" | "success" | "error">("idle")
-  const [errorMsg, setErrorMsg] = useState("")
+  const [status, setStatus]   = useState<"idle" | "saving" | "verifying" | "connected" | "error">("idle")
+  const [errorMsg, setErrorMsg]     = useState("")
+  const [verified, setVerified]     = useState<VerifyResult | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setStatus("loading")
+    setStatus("saving")
+    setVerified(null)
 
-    const res = await fetch("/api/settings/whatsapp", {
+    // 1. Guardar credenciales
+    const saveRes = await fetch("/api/settings/whatsapp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -22,13 +33,21 @@ export default function WhatsappForm({ config }: { config: WhatsappConfig | null
       }),
     })
 
-    const data = await res.json()
-    if (data.error) {
-      setErrorMsg(data.error)
+    const saveData = await saveRes.json()
+    if (saveData.error) {
+      setErrorMsg(saveData.error)
       setStatus("error")
-    } else {
-      setStatus("success")
+      return
     }
+
+    // 2. Verificar conexión con Meta
+    setStatus("verifying")
+    const verifyRes  = await fetch("/api/settings/whatsapp/verify")
+    const verifyData: VerifyResult = await verifyRes.json()
+
+    setVerified(verifyData)
+    setStatus(verifyData.ok ? "connected" : "error")
+    if (!verifyData.ok) setErrorMsg(verifyData.error ?? "No se pudo verificar la conexión")
   }
 
   return (
@@ -71,27 +90,39 @@ export default function WhatsappForm({ config }: { config: WhatsappConfig | null
           />
         </div>
 
-        {status === "success" && (
-          <div className="bg-green-50 border border-green-200 text-green-700 text-sm px-3 py-2 rounded-lg">
-            ✅ Configuración guardada
+        {/* Resultado de verificación */}
+        {status === "connected" && verified?.ok && (
+          <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex flex-col gap-0.5">
+            <p className="text-green-700 text-sm font-semibold">✅ Conectado con Meta</p>
+            {verified.verifiedName && (
+              <p className="text-green-600 text-xs">Cuenta: <span className="font-medium">{verified.verifiedName}</span></p>
+            )}
+            {verified.displayPhoneNumber && (
+              <p className="text-green-600 text-xs">Número: <span className="font-medium">{verified.displayPhoneNumber}</span></p>
+            )}
+            {verified.qualityRating && (
+              <p className="text-green-600 text-xs">Calidad: <span className="font-medium">{verified.qualityRating}</span></p>
+            )}
           </div>
         )}
+
         {status === "error" && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2 rounded-lg">
-            {errorMsg}
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">
+            ❌ {errorMsg}
           </div>
         )}
 
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            disabled={status === "loading"}
+            disabled={status === "saving" || status === "verifying"}
             className="bg-green-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50"
           >
-            {status === "loading" ? "Guardando..." : "Guardar"}
+            {status === "saving"    ? "Guardando..."    :
+             status === "verifying" ? "Verificando..."  : "Guardar y verificar"}
           </button>
           {config?.is_configured && status === "idle" && (
-            <span className="text-xs text-green-600 font-medium">● Conectado</span>
+            <span className="text-xs text-green-600 font-medium">● Configurado</span>
           )}
         </div>
       </form>
