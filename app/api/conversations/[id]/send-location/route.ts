@@ -3,7 +3,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { sendWhatsAppLocation } from "@/lib/whatsapp"
-import { isWithin24hWindow } from "@/lib/whatsapp-utils"
 
 export async function POST(
   _req: NextRequest,
@@ -28,18 +27,11 @@ export async function POST(
 
   const { data: conversation } = await supabase
     .from("conversations")
-    .select("id, last_user_message_at, contacts ( phone )")
+    .select("id, contacts ( phone )")
     .eq("id", params.id)
     .eq("tenant_id", tenant.id)
     .single()
   if (!conversation) return NextResponse.json({ error: "Conversación no encontrada" }, { status: 404 })
-
-  if (!isWithin24hWindow(conversation.last_user_message_at)) {
-    return NextResponse.json(
-      { error: "Fuera de la ventana de 24h. Solo se pueden enviar templates aprobados." },
-      { status: 403 }
-    )
-  }
 
   const contact = Array.isArray(conversation.contacts) ? conversation.contacts[0] : conversation.contacts
 
