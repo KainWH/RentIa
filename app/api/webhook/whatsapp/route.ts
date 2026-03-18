@@ -3,17 +3,18 @@
 // También usa GET para verificar el webhook al configurarlo
 
 import { NextRequest, NextResponse } from "next/server"
+import { waitUntil } from "@vercel/functions"
 import { createClient } from "@supabase/supabase-js"
 import { generateReply, transcribeAudio, describeImage } from "@/lib/ai"
 import { sendWhatsAppMessage, sendWhatsAppMedia, sendWhatsAppLocation, uploadMedia, markAsRead, downloadMedia, sendWhatsAppTemplate } from "@/lib/whatsapp"
 import { getPropertyData, findImageUrl } from "@/lib/sheets"
+import { validateWebhookSignature } from "@/lib/whatsapp-utils"
 
 // Deduplicación en memoria — evita reprocesar si Meta reenvía el webhook
 const recentlyProcessed = new Set<string>()
 function isAlreadyProcessed(msgId: string): boolean {
   if (recentlyProcessed.has(msgId)) return true
   recentlyProcessed.add(msgId)
-  // Limpiar después de 10 minutos
   setTimeout(() => recentlyProcessed.delete(msgId), 10 * 60 * 1000)
   return false
 }
@@ -26,10 +27,9 @@ function createServiceClient() {
   )
 }
 
-// ── GET: Verificación del webhook (Meta lo llama 1 sola vez al configurar) ──
+// ── GET: Verificación del webhook ────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
-
   const mode      = searchParams.get("hub.mode")
   const token     = searchParams.get("hub.verify_token")
   const challenge = searchParams.get("hub.challenge")
@@ -38,13 +38,23 @@ export async function GET(request: NextRequest) {
     console.log("✅ Webhook de WhatsApp verificado")
     return new NextResponse(challenge, { status: 200 })
   }
-
   return NextResponse.json({ error: "Token inválido" }, { status: 403 })
 }
 
-// ── POST: Recibe mensajes nuevos de WhatsApp ──
+// ── POST: Recibe mensajes nuevos de WhatsApp ─────────────────────────────────
 export async function POST(request: NextRequest) {
-  const body = await request.json()
+  // 1. Leer body RAW (necesario antes de parsear para validar firma)
+  const rawBody = await request.text()
+
+  // 2. Validar firma de Meta — CRÍTICO: rechazar si no viene de Meta
+  const signature = request.headers.get("x-hub-signature-256")
+  if (!validateWebhookSignature(rawBody, signature)) {
+    console.warn("⚠️ Webhook rechazado: firma inválida")
+    return new NextResponse("Unauthorized", { status: 401 })
+  }
+
+  // 3. Parsear JSON
+  const body = JSON.parse(rawBody)
 
   const value    = body?.entry?.[0]?.changes?.[0]?.value
   const messages = value?.messages
@@ -53,28 +63,44 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ status: "ok" }, { status: 200 })
   }
 
-  const message          = messages[0]
-  const from             = message.from
-  const whatsappMsgId    = message.id
-  const phoneNumberId    = value?.metadata?.phone_number_id
-  const contactName: string | null = value?.contacts?.[0]?.profile?.name ?? null
-  const referral         = message.referral ?? null   // presente cuando el cliente llega desde un anuncio CTWA
-  if (referral) console.log(`📣 Referral recibido:`, JSON.stringify(referral))
+  const message       = messages[0]
+  const whatsappMsgId = message.id
 
   const supported = ["text", "audio", "voice", "image"]
   if (!supported.includes(message.type)) {
     return NextResponse.json({ status: "ok" }, { status: 200 })
   }
 
-  // ── DEDUPLICACIÓN EN MEMORIA (primer filtro — evita reintentos de Meta) ──
+  // 4. Deduplicación en memoria (rápido — antes de tocar la DB)
   if (isAlreadyProcessed(whatsappMsgId)) {
     console.log(`⏭️ Mensaje ya procesado (memoria): ${whatsappMsgId}`)
     return NextResponse.json({ status: "ok" }, { status: 200 })
   }
 
+  // 5. Responder 200 INMEDIATAMENTE y procesar de forma asíncrona
+  //    waitUntil garantiza que Vercel no mata la función hasta que termine el procesamiento
+  waitUntil(processWebhookMessage(body))
+
+  return NextResponse.json({ status: "ok" }, { status: 200 })
+}
+
+// ── Procesamiento asíncrono del mensaje ─────────────────────────────────────
+async function processWebhookMessage(body: any) {
+  const value    = body?.entry?.[0]?.changes?.[0]?.value
+  const messages = value?.messages
+  if (!messages?.length) return
+
+  const message          = messages[0]
+  const from             = message.from
+  const whatsappMsgId    = message.id
+  const phoneNumberId    = value?.metadata?.phone_number_id
+  const contactName: string | null = value?.contacts?.[0]?.profile?.name ?? null
+  const referral         = message.referral ?? null
+  if (referral) console.log(`📣 Referral recibido:`, JSON.stringify(referral))
+
   const supabase = createServiceClient()
 
-  // ── DEDUPLICACIÓN EN DB (segundo filtro — por si el servidor reinició) ──
+  // Deduplicación en DB (por si el servidor reinició)
   const { data: duplicate } = await supabase
     .from("messages")
     .select("id")
@@ -83,10 +109,10 @@ export async function POST(request: NextRequest) {
 
   if (duplicate) {
     console.log(`⏭️ Mensaje duplicado ignorado (DB): ${whatsappMsgId}`)
-    return NextResponse.json({ status: "ok" }, { status: 200 })
+    return
   }
 
-  // ── PASO 1: Tenant ──
+  // ── Tenant ───────────────────────────────────────────────────────────────
   const { data: whatsappConfig } = await supabase
     .from("whatsapp_configs")
     .select("tenant_id, access_token, phone_number_id")
@@ -95,21 +121,20 @@ export async function POST(request: NextRequest) {
 
   if (!whatsappConfig) {
     console.error(`❌ No se encontró tenant para phone_number_id: ${phoneNumberId}`)
-    return NextResponse.json({ status: "ok" }, { status: 200 })
+    return
   }
 
   const tenantId = whatsappConfig.tenant_id
 
-  // Cargar config del catálogo del tenant
   const { data: catalogConfig } = await supabase
     .from("catalog_configs")
     .select("sheet_id, sheet_gid, enabled")
     .eq("tenant_id", tenantId)
     .maybeSingle()
 
-  // ── PASO 2: Procesar el contenido del mensaje ──
-  let textForAI  = message.text?.body ?? ""
-  let textForDB  = textForAI
+  // ── Procesar contenido del mensaje ───────────────────────────────────────
+  let textForAI   = message.text?.body ?? ""
+  let textForDB   = textForAI
   let messageType = "text"
   let inboundMediaId: string | null = null
 
@@ -119,7 +144,6 @@ export async function POST(request: NextRequest) {
   if (isAudio && audioId) {
     inboundMediaId = audioId
     messageType    = "audio"
-
     const media = await downloadMedia({ mediaId: audioId, accessToken: whatsappConfig.access_token! })
     if (!media) {
       textForAI = "El usuario envió una nota de voz (no se pudo transcribir)"
@@ -135,7 +159,6 @@ export async function POST(request: NextRequest) {
   if (message.type === "image" && message.image?.id) {
     inboundMediaId = message.image.id
     messageType    = "image"
-
     const media = await downloadMedia({ mediaId: message.image.id, accessToken: whatsappConfig.access_token! })
     if (!media) {
       textForAI = "El usuario envió una imagen (no se pudo procesar)"
@@ -150,11 +173,10 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (!textForAI) {
-    return NextResponse.json({ status: "ok" }, { status: 200 })
-  }
+  if (!textForAI) return
 
-  // ── PASO 3: Contacto ──
+  // ── Contacto (upsert con opt-in) ─────────────────────────────────────────
+  const optInSource = referral?.source_id ? "ctwa_ad" : "direct_message"
   const { data: contact } = await supabase
     .from("contacts")
     .upsert(
@@ -162,6 +184,9 @@ export async function POST(request: NextRequest) {
         tenant_id:       tenantId,
         phone:           from,
         last_message_at: new Date().toISOString(),
+        opted_in_at:     new Date().toISOString(),
+        opt_in_source:   optInSource,
+        ...(referral?.ctwa_clid ? { ctwa_clid: referral.ctwa_clid } : {}),
         ...(contactName ? { name: contactName } : {}),
       },
       { onConflict: "tenant_id,phone" }
@@ -171,13 +196,13 @@ export async function POST(request: NextRequest) {
 
   if (!contact) {
     console.error("❌ Error al crear/actualizar contacto")
-    return NextResponse.json({ status: "ok" }, { status: 200 })
+    return
   }
 
-  // ── PASO 4: Conversación ──
+  // ── Conversación ─────────────────────────────────────────────────────────
   const { data: existingConversation, error: convError } = await supabase
     .from("conversations")
-    .select("id, ai_paused")
+    .select("id, ai_paused, awaiting_approval")
     .eq("tenant_id", tenantId)
     .eq("contact_id", contact.id)
     .eq("status", "open")
@@ -190,36 +215,38 @@ export async function POST(request: NextRequest) {
   let conversationId: string
   let aiPaused         = false
   let awaitingApproval = false
-
   let isNewConversation = false
 
   if (existingConversation) {
-    conversationId = existingConversation.id
-    aiPaused       = existingConversation.ai_paused ?? false
+    conversationId   = existingConversation.id
+    aiPaused         = existingConversation.ai_paused ?? false
+    awaitingApproval = existingConversation.awaiting_approval ?? false
 
-    // awaiting_approval en query separada (requiere migración DB)
-    const { data: convExtra } = await supabase
+    // Actualizar ventana de 24h
+    await supabase
       .from("conversations")
-      .select("awaiting_approval")
+      .update({ last_user_message_at: new Date().toISOString() })
       .eq("id", conversationId)
-      .maybeSingle()
-    awaitingApproval = convExtra?.awaiting_approval ?? false
   } else {
     const { data: newConversation } = await supabase
       .from("conversations")
-      .insert({ tenant_id: tenantId, contact_id: contact.id })
+      .insert({
+        tenant_id:            tenantId,
+        contact_id:           contact.id,
+        last_user_message_at: new Date().toISOString(),
+      })
       .select("id")
       .single()
 
     if (!newConversation) {
       console.error("❌ Error al crear conversación")
-      return NextResponse.json({ status: "ok" }, { status: 200 })
+      return
     }
 
     conversationId    = newConversation.id
     isNewConversation = true
 
-    // Si el cliente llegó desde un anuncio, guardarlo como nota en el contacto
+    // Si el cliente llegó desde un anuncio, guardar nota + imagen
     if (referral?.headline) {
       const adNote = `[Origen: Anuncio "${referral.headline}"${referral.source_id ? ` (ID: ${referral.source_id})` : ""}]`
       const { data: currentContact } = await supabase
@@ -230,7 +257,6 @@ export async function POST(request: NextRequest) {
       await supabase.from("contacts").update({ notes: updatedNotes }).eq("id", contact.id)
       console.log(`📣 Cliente de anuncio "${referral.headline}" — nota guardada para ${from}`)
 
-      // Mostrar la imagen del anuncio en el chat (si viene con imagen)
       if (referral.image_url) {
         await supabase.from("messages").insert([
           {
@@ -253,7 +279,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── PASO 5: Guardar mensaje entrante ──
+  // ── Guardar mensaje entrante ──────────────────────────────────────────────
   await supabase.from("messages").insert({
     conversation_id:     conversationId,
     content:             textForDB,
@@ -266,34 +292,30 @@ export async function POST(request: NextRequest) {
 
   console.log(`📩 Mensaje guardado de ${from}: "${textForDB}"`)
 
-  // ── PASO 6: Marcar como leído ──
+  // ── Marcar como leído ─────────────────────────────────────────────────────
   await markAsRead({
     messageId:     whatsappMsgId,
     phoneNumberId: whatsappConfig.phone_number_id!,
     accessToken:   whatsappConfig.access_token!,
   })
 
-  // ── HELPER: enviar imagen a un número (descarga → sube → envía) ──
+  // ── Helper: enviar imagen ─────────────────────────────────────────────────
   const sendImageToPhone = async (buffer: Buffer, mimeType: string, to: string) => {
     const ext     = mimeType.split("/")[1]?.split(";")[0] ?? "jpg"
     const mediaId = await uploadMedia({
-      buffer,
-      mimeType,
+      buffer, mimeType,
       filename:      `imagen.${ext}`,
       phoneNumberId: whatsappConfig.phone_number_id!,
       accessToken:   whatsappConfig.access_token!,
     })
     if (!mediaId) throw new Error("uploadMedia devolvió null")
     await sendWhatsAppMedia({
-      to,
-      mediaId,
-      type:          "image",
+      to, mediaId, type: "image",
       phoneNumberId: whatsappConfig.phone_number_id!,
       accessToken:   whatsappConfig.access_token!,
     })
   }
 
-  // ── HELPER: enviar imagen desde URL del Sheet ──
   const sendImageFromUrl = async (imageUrl: string, to: string) => {
     const imgRes = await fetch(imageUrl)
     if (!imgRes.ok) throw new Error(`No se pudo descargar imagen: ${imgRes.status}`)
@@ -302,7 +324,7 @@ export async function POST(request: NextRequest) {
     await sendImageToPhone(buffer, mimeType, to)
   }
 
-  // ── PASO 7: Respuesta automática con IA ──
+  // ── Respuesta automática con IA ───────────────────────────────────────────
   const { data: aiConfig } = await supabase
     .from("ai_configs")
     .select("enabled, system_prompt")
@@ -311,9 +333,7 @@ export async function POST(request: NextRequest) {
 
   console.log(`🔧 AI config: enabled=${aiConfig?.enabled}, aiPaused=${aiPaused}`)
 
-  if (!aiConfig?.enabled || aiPaused) {
-    return NextResponse.json({ status: "ok" }, { status: 200 })
-  }
+  if (!aiConfig?.enabled || aiPaused) return
 
   // Historial de conversación
   const { data: recentMessages } = await supabase
@@ -331,24 +351,16 @@ export async function POST(request: NextRequest) {
       content: msg.content,
     }))
 
-  // ══ FUENTES DE CONOCIMIENTO DEL AGENTE ══
-  // Tres fuentes en paralelo para máxima velocidad
-
+  // Fuentes de conocimiento
   const [sheetResult, kainoResult, docsResult] = await Promise.all([
-
-    // 1. Google Sheets (si está conectado y habilitado)
     catalogConfig?.sheet_id && catalogConfig?.enabled !== false
       ? getPropertyData(catalogConfig.sheet_id, catalogConfig.sheet_gid)
       : Promise.resolve({ text: "", imageMap: {} }),
-
-    // 2. Catálogo SomosKaino (productos creados en la app)
     supabase
       .from("catalog_products")
       .select("name, description, price, currency, image_url")
       .eq("tenant_id", tenantId)
       .eq("enabled", true),
-
-    // 3. Documentos subidos por el usuario
     supabase
       .from("knowledge_documents")
       .select("name, content")
@@ -356,11 +368,10 @@ export async function POST(request: NextRequest) {
       .eq("enabled", true),
   ])
 
-  const sheetData      = sheetResult
+  const sheetData     = sheetResult
   const kainoProducts = kainoResult.data ?? []
-  const knowledgeDocs  = docsResult.data ?? []
+  const knowledgeDocs = docsResult.data ?? []
 
-  // Formatear catálogo SomosKaino como texto
   const kainoCatalogText = kainoProducts.length > 0
     ? kainoProducts.map(p => {
         const price = p.price != null ? ` — ${p.currency} ${p.price}` : ""
@@ -370,30 +381,25 @@ export async function POST(request: NextRequest) {
       }).join("\n")
     : ""
 
-  // Mapa de imágenes SomosKaino para envío automático por WhatsApp
   const kainoCatalogImageMap: Record<string, string> = {}
   for (const p of kainoProducts) {
     if (p.image_url) kainoCatalogImageMap[p.name.toLowerCase()] = p.image_url
   }
 
-  // Formatear documentos
   const docsText = knowledgeDocs
     .map(doc => `## ${doc.name}:\n${doc.content}`)
     .join("\n\n")
 
-  // Ensamblar contexto final
   const knowledgeParts: string[] = []
   if (kainoCatalogText) knowledgeParts.push(`## Catálogo de productos:\n${kainoCatalogText}`)
-  if (sheetData.text)    knowledgeParts.push(`## Inventario (Spreadsheet):\n${sheetData.text}`)
-  if (docsText)          knowledgeParts.push(docsText)
+  if (sheetData.text)   knowledgeParts.push(`## Inventario (Spreadsheet):\n${sheetData.text}`)
+  if (docsText)         knowledgeParts.push(docsText)
 
   const knowledgeContext = knowledgeParts.join("\n\n")
-
   const basePrompt = knowledgeContext
     ? `${aiConfig.system_prompt}\n\n${knowledgeContext}`
     : aiConfig.system_prompt
 
-  // Contexto del anuncio (solo si es conversación nueva y hay referral)
   const referralContext = isNewConversation && referral?.headline
     ? `\n\nCONTEXTO DE ORIGEN: Este cliente llegó haciendo clic en el anuncio "${referral.headline}"${referral.body ? ` ("${referral.body}")` : ""}. IMPORTANTE: si el cliente dice "esto", "eso", "lo del anuncio", "quiero eso" o cualquier expresión vaga, asume que se refiere al producto de ese anuncio. No le preguntes a qué se refiere — respóndele directamente sobre ese producto.`
     : ""
@@ -402,7 +408,6 @@ export async function POST(request: NextRequest) {
     ? `${basePrompt}\n\nIMPORTANTE: Ya has interactuado con este cliente antes. NO vuelvas a saludarlo. Continúa la conversación de forma natural.`
     : `${basePrompt}${referralContext}`
 
-  // Helper fallback
   const sendFallback = async () => {
     const fallback = "En este momento tuve un inconveniente para responder. Vuelvo enseguida. 🙏"
     try {
@@ -413,16 +418,14 @@ export async function POST(request: NextRequest) {
       })
       await supabase.from("messages").insert({
         conversation_id: conversationId,
-        content:         fallback,
-        direction:       "outbound",
-        sent_by_ai:      true,
+        content: fallback, direction: "outbound", sent_by_ai: true,
       })
     } catch (err) {
       console.error("❌ Error enviando fallback:", err)
     }
   }
 
-  // Generar respuesta
+  // Generar respuesta con Gemini
   let aiReply: Awaited<ReturnType<typeof generateReply>>
   try {
     aiReply = await generateReply({ userMessage: textForAI, systemPrompt, conversationHistory: history })
@@ -430,43 +433,38 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error("❌ Error generando respuesta con IA:", err)
     await sendFallback()
-    return NextResponse.json({ status: "ok" }, { status: 200 })
+    return
   }
 
   const { reply, productName, sendLocation, leadNotes } = aiReply
-  // Doble seguro: si Gemini olvida poner handover:true pero dijo "Dame un momento", lo forzamos aquí
   const handover = aiReply.handover || reply.toLowerCase().includes("dame un momento")
-  console.log(`🔀 handover=${handover} (ai=${aiReply.handover}, reply_check=${reply.toLowerCase().includes("dame un momento")})`)
+  console.log(`🔀 handover=${handover}`)
 
-  // ── Guardar notas del lead si la IA detectó información relevante ──
+  // Guardar notas del lead
   if (leadNotes) {
-    const timestamp = new Date().toLocaleDateString("es-DO", { day: "numeric", month: "short", year: "numeric" })
-    const newNote   = `[${timestamp}] ${leadNotes}`
-
+    const timestamp   = new Date().toLocaleDateString("es-DO", { day: "numeric", month: "short", year: "numeric" })
+    const newNote     = `[${timestamp}] ${leadNotes}`
     const { data: currentContact } = await supabase
       .from("contacts").select("notes").eq("id", contact.id).single()
-
     const updatedNotes = currentContact?.notes
       ? `${currentContact.notes}\n${newNote}`
       : newNote
-
     await supabase.from("contacts").update({ notes: updatedNotes }).eq("id", contact.id)
     console.log(`📝 Nota guardada para ${from}: "${leadNotes}"`)
   }
 
-  // ── Handover: pausar IA y notificar asesores ──
+  // Handover: pausar IA y notificar asesores
   if (handover) {
     await supabase.from("conversations").update({ ai_paused: true }).eq("id", conversationId)
-    console.log(`🤝 Handover activado para conversación ${conversationId} — IA pausada`)
+    console.log(`🤝 Handover activado para conversación ${conversationId}`)
 
-    // Obtener nombre del contacto para la notificación
     const { data: contactInfo } = await supabase
       .from("contacts").select("name, phone").eq("id", contact.id).single()
     const clientName  = contactInfo?.name ?? contactInfo?.phone ?? from
     const orderDetail = leadNotes ? `\n\n📋 *Detalle:* ${leadNotes}` : ""
     const alertMsg    = `🛒 *Pedido confirmado*\n\nCliente: *${clientName}*\nTeléfono: ${from}${orderDetail}\n\n👉 Coordina el pago y la entrega.`
 
-    const ALERT_NUMBERS = ["18094173098", "18292856400"]
+    const ALERT_NUMBERS  = ["18094173098", "18292856400"]
     const templateParams = [
       clientName,
       from,
@@ -475,9 +473,9 @@ export async function POST(request: NextRequest) {
     const results = await Promise.allSettled(
       ALERT_NUMBERS.map((num) =>
         sendWhatsAppTemplate({
-          to:           num,
-          templateName: "pedido_confirmado",
-          parameters:   templateParams,
+          to:            num,
+          templateName:  "pedido_confirmado",
+          parameters:    templateParams,
           phoneNumberId: whatsappConfig.phone_number_id!,
           accessToken:   whatsappConfig.access_token!,
         })
@@ -492,7 +490,7 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // ── Enviar ubicación de la tienda si el AI lo indicó ──
+  // Enviar ubicación si el AI lo indicó
   if (sendLocation) {
     const lat     = parseFloat(process.env.STORE_LATITUDE  ?? "0")
     const lng     = parseFloat(process.env.STORE_LONGITUDE ?? "0")
@@ -502,11 +500,7 @@ export async function POST(request: NextRequest) {
     if (lat && lng) {
       try {
         const sentLoc = await sendWhatsAppLocation({
-          to:            from,
-          latitude:      lat,
-          longitude:     lng,
-          name,
-          address,
+          to: from, latitude: lat, longitude: lng, name, address,
           phoneNumberId: whatsappConfig.phone_number_id!,
           accessToken:   whatsappConfig.access_token!,
         })
@@ -522,13 +516,10 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error("❌ Error enviando ubicación:", err)
       }
-    } else {
-      console.warn("⚠️ STORE_LATITUDE/STORE_LONGITUDE no configurados — no se envió ubicación")
     }
   }
 
-  // ── Enviar imagen del producto si el AI lo indicó ──
-  // Busca en: 1) Catálogo SomosKaino  2) Google Sheets
+  // Enviar imagen del producto si el AI lo indicó
   if (productName) {
     const imageUrl =
       findImageUrl(productName, kainoCatalogImageMap) ??
@@ -547,12 +538,10 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error(`❌ Error enviando imagen de "${productName}":`, err)
       }
-    } else {
-      console.warn(`⚠️ No se encontró imagen para producto: "${productName}"`)
     }
   }
 
-  // ── Enviar texto de respuesta ──
+  // Enviar texto de respuesta
   if (reply) {
     try {
       const sent = await sendWhatsAppMessage({
@@ -573,9 +562,6 @@ export async function POST(request: NextRequest) {
       await sendFallback()
     }
   } else if (!productName && !sendLocation && !handover) {
-    // No hubo imagen, ubicación, handover ni texto — enviar fallback
     await sendFallback()
   }
-
-  return NextResponse.json({ status: "ok" }, { status: 200 })
 }
