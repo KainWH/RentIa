@@ -29,8 +29,7 @@ export async function POST(request: NextRequest) {
 
   const { error } = await supabase
     .from("whatsapp_configs")
-    .update(updatePayload)
-    .eq("tenant_id", tenant.id)
+    .upsert({ ...updatePayload, tenant_id: tenant.id }, { onConflict: "tenant_id" })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

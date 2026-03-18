@@ -52,7 +52,8 @@ export async function GET() {
       verifiedName:       data.verified_name,
       qualityRating:      data.quality_rating,
     })
-  } catch {
-    return NextResponse.json({ ok: false, error: "No se pudo conectar con Meta" })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ ok: false, error: `Error de red: ${msg}` })
   }
 }
