@@ -77,6 +77,14 @@ export default function MessagesView({ messages: initial, avatarColor, contactIn
 
         // Banner especial para mensajes de origen de anuncio
         if (msg.message_type === "referral") {
+          let headline = msg.content
+          let platform = "Meta Ads"
+          try {
+            const parsed = JSON.parse(msg.content)
+            headline = parsed.headline ?? msg.content
+            platform = parsed.platform ?? "Meta Ads"
+          } catch { /* formato antiguo */ }
+
           return (
             <div key={msg.id}>
               {showDate && (
@@ -91,7 +99,7 @@ export default function MessagesView({ messages: initial, avatarColor, contactIn
               <div className="flex justify-center my-3">
                 <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium px-4 py-2 rounded-full">
                   <Megaphone size={12} />
-                  <span>Cliente desde anuncio: <span className="font-bold">{msg.content}</span></span>
+                  <span>{platform} · <span className="font-bold">{headline}</span></span>
                 </div>
               </div>
             </div>

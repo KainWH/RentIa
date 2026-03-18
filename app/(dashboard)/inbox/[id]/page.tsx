@@ -34,11 +34,33 @@ export default async function ConversationPage({ params }: { params: { id: strin
   const displayName  = contact?.name ?? contact?.phone ?? "Desconocido"
   const avatarColor  = getAvatarColor(contact?.phone ?? displayName)
 
-  const { data: messages } = await supabase
-    .from("messages")
-    .select("id, content, direction, sent_by_ai, created_at, message_type, media_id")
-    .eq("conversation_id", conversation.id)
-    .order("created_at", { ascending: true })
+  const [{ data: messages }, { data: referralMsg }] = await Promise.all([
+    supabase
+      .from("messages")
+      .select("id, content, direction, sent_by_ai, created_at, message_type, media_id")
+      .eq("conversation_id", conversation.id)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("messages")
+      .select("content")
+      .eq("conversation_id", conversation.id)
+      .eq("message_type", "referral")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  // Parsear datos del anuncio de origen
+  type ReferralData = { headline: string; platform: string; image_url: string | null }
+  let referralData: ReferralData | null = null
+  if (referralMsg?.content) {
+    try {
+      referralData = JSON.parse(referralMsg.content) as ReferralData
+    } catch {
+      // formato antiguo (solo texto) — compatibilidad
+      referralData = { headline: referralMsg.content, platform: "Meta Ads", image_url: null }
+    }
+  }
 
   return (
     <>
@@ -73,6 +95,7 @@ export default async function ConversationPage({ params }: { params: { id: strin
         aiPaused={conversation.ai_paused ?? false}
         status={conversation.status}
         conversationId={conversation.id}
+        referral={referralData}
       />
     </>
   )
