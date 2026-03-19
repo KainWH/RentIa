@@ -64,7 +64,7 @@ function getReadIds(): Set<string> {
   catch { return new Set() }
 }
 function saveReadIds(ids: Set<string>) {
-  localStorage.setItem(READ_KEY, JSON.stringify([...ids]))
+  localStorage.setItem(READ_KEY, JSON.stringify(Array.from(ids)))
 }
 
 // ── Notification panel ────────────────────────────────────────────────────────
