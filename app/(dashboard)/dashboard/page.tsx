@@ -47,7 +47,9 @@ export default async function DashboardPage() {
     supabase.from("ai_configs").select("enabled").eq("tenant_id", tenant.id).single(),
     supabase.from("conversations")
       .select("id, status, ai_paused, updated_at, contacts(id, name, phone)")
-      .eq("tenant_id", tenant.id).eq("status", "open").order("updated_at", { ascending: false }).limit(8),
+      .eq("tenant_id", tenant.id).eq("status", "open")
+      .gte("updated_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order("updated_at", { ascending: false }).limit(20),
     supabase.from("orders").select("*", { count: "exact", head: true }).eq("tenant_id", tenant.id).eq("status", "pending"),
   ])
 
