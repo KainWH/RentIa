@@ -75,13 +75,16 @@ export default function ConversationList({
     const supabase = createClient()
 
     const refresh = async () => {
+      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
       const { data: convs } = await supabase
         .from("conversations")
         .select("id, status, ai_paused, updated_at, contacts ( id, name, phone )")
         .eq("tenant_id", tenantId)
         .eq("status", "open")
+        .gte("updated_at", since24h)
         .order("updated_at", { ascending: false })
-        .limit(8)
+        .limit(20)
 
       if (!convs) return
 
@@ -124,6 +127,11 @@ export default function ConversationList({
       const contact = getContact(c)
       const name    = contact?.name ?? contact?.phone ?? ""
       return name.toLowerCase().includes(query.toLowerCase())
+    })
+    // Pendientes primero, luego por última actividad
+    .sort((a, b) => {
+      if (a.ai_paused !== b.ai_paused) return a.ai_paused ? -1 : 1
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     })
 
   return (
