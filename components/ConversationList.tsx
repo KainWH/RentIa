@@ -102,6 +102,8 @@ export default function ConversationList({
       setConversations(convs.map(c => ({ ...c, messages: msgsByConv[c.id] ?? [] })) as Conv[])
     }
 
+    refresh()
+
     const channel = supabase
       .channel("convlist-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, refresh)
