@@ -564,7 +564,7 @@ async function processWebhookMessage(body: any) {
         })
         console.log(`📲 Alerta (template) enviada a ${num}`)
       } catch (templateErr: any) {
-        console.error(`❌ Template falló para ${num}:`, JSON.stringify(templateErr?.message ?? templateErr))
+        console.error(`❌ Template falló para ${num} — error Meta:`, templateErr?.message ?? templateErr)
         // Fallback: texto directo
         try {
           await sendWhatsAppMessage({
@@ -575,7 +575,7 @@ async function processWebhookMessage(body: any) {
           })
           console.log(`📲 Alerta (texto fallback) enviada a ${num}`)
         } catch (textErr: any) {
-          console.error(`❌ Fallback texto también falló para ${num}:`, JSON.stringify(textErr?.message ?? textErr))
+          console.error(`❌ Fallback texto también falló para ${num} — error Meta:`, textErr?.message ?? textErr)
         }
       }
     }
