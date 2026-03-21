@@ -446,16 +446,16 @@ async function processWebhookMessage(body: any) {
 
   const referralContext = adHeadline
     ? adProduct
-      ? `\n\nCONTEXTO CRÍTICO — ANUNCIO DE PAGO: Este cliente llegó desde un anuncio de ${adPlatform} sobre "${adHeadline}". ${adProductInfo} REGLAS: (1) NUNCA preguntes a qué producto se refiere — ya lo sabes. (2) ${isNewConversation ? `Es el PRIMER contacto: salúdalo con UNA oración, menciona el producto y el precio, pregunta si lo quiere.` : `Continúa la conversación sobre "${adHeadline}" de forma breve.`} (3) Si preguntan precio/detalles/stock sin especificar producto, siempre es sobre "${adHeadline}". (4) NUNCA listes especificaciones técnicas a menos que las pidan.`
-      : `\n\nCONTEXTO — ANUNCIO DE PAGO: Este cliente llegó desde un anuncio de ${adPlatform} titulado "${adHeadline}", pero ese producto no está en el catálogo actual. REGLA OBLIGATORIA: salúdalo y pregúntale de qué producto se trata para poder ayudarlo correctamente.`
+      ? `\n\nCONTEXTO CRÍTICO — ANUNCIO DE PAGO: Este cliente llegó desde un anuncio de ${adPlatform} sobre "${adHeadline}". ${adProductInfo} REGLAS: (1) NUNCA preguntes a qué producto se refiere — ya lo sabes. (2) ${isNewConversation ? `El saludo ya fue enviado automáticamente. Tu primer mensaje debe confirmar que SÍ tenemos el producto y preguntar cuántas unidades quiere. Ej: "Sí, tenemos el ${adProduct.name} a ${adProduct.currency} ${adProduct.price}. ¿Cuántas unidades necesitas?"` : `Continúa la conversación sobre "${adHeadline}" de forma breve.`} (3) Si preguntan precio/detalles/stock sin especificar producto, siempre es sobre "${adHeadline}". (4) NUNCA listes especificaciones técnicas a menos que las pidan.`
+      : `\n\nCONTEXTO — ANUNCIO DE PAGO: Este cliente llegó desde un anuncio de ${adPlatform} titulado "${adHeadline}", pero ese producto no está en el catálogo actual. El saludo ya fue enviado automáticamente. Pregúntale de qué producto se trata para poder ayudarlo correctamente.`
     : ""
 
   const companyContext = companyName
     ? `\n\nNOMBRE DE LA EMPRESA: Eres el asistente virtual de "${companyName}". Cuando saludes por primera vez, identifícate como asistente de ${companyName} (ej: "¡Hola! Gracias por escribir a ${companyName}, ¿en qué te puedo ayudar?"). NUNCA uses un saludo genérico sin mencionar la empresa.`
     : ""
 
-  const systemPrompt = history.length > 0
-    ? `${basePrompt}${companyContext}${referralContext}\n\nIMPORTANTE: Ya has interactuado con este cliente antes. NO vuelvas a saludarlo. Continúa la conversación de forma natural.`
+  const systemPrompt = history.length > 0 || isNewConversation
+    ? `${basePrompt}${companyContext}${referralContext}\n\nIMPORTANTE: El saludo inicial ya fue enviado automáticamente. NO vuelvas a saludar. Continúa la conversación de forma natural.`
     : `${basePrompt}${companyContext}${referralContext}`
 
   const sendFallback = async () => {
@@ -476,6 +476,28 @@ async function processWebhookMessage(body: any) {
   }
 
   // Generar respuesta con Gemini
+  // Enviar saludo fijo en conversaciones nuevas
+  if (isNewConversation) {
+    const greeting = `Saludos, te comunicas con la tienda ${companyName ?? "Techjol"} 👋`
+    try {
+      const sentGreeting = await sendWhatsAppMessage({
+        to: from, message: greeting,
+        phoneNumberId: whatsappConfig.phone_number_id!,
+        accessToken:   whatsappConfig.access_token!,
+      })
+      await supabase.from("messages").insert({
+        conversation_id:     conversationId,
+        content:             greeting,
+        direction:           "outbound",
+        sent_by_ai:          true,
+        whatsapp_message_id: sentGreeting?.messages?.[0]?.id ?? null,
+      })
+      console.log(`👋 Saludo enviado a ${from}`)
+    } catch (err) {
+      console.error("❌ Error enviando saludo:", err)
+    }
+  }
+
   let aiReply: Awaited<ReturnType<typeof generateReply>>
   try {
     aiReply = await generateReply({ userMessage: textForAI, systemPrompt, conversationHistory: history })
