@@ -66,12 +66,33 @@ export default function InboxList({ initialConversations, tenantId }: { initialC
     const supabase = createClient()
 
     const refresh = async () => {
-      const { data } = await supabase
+      const since7days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+      const { data: convs } = await supabase
         .from("conversations")
-        .select("id, status, ai_paused, updated_at, deleted_at, contacts ( id, name, phone ), messages ( content, direction, sent_by_ai, created_at )")
+        .select("id, status, ai_paused, updated_at, deleted_at, contacts ( id, name, phone )")
         .eq("tenant_id", tenantId)
+        .or(`updated_at.gte.${since7days},ai_paused.eq.true`)
         .order("updated_at", { ascending: false })
-      if (data) setConversations(data as Conv[])
+        .limit(80)
+
+      if (!convs) return
+
+      // Traer solo el último mensaje por conversación en una sola query
+      const ids = convs.map(c => c.id)
+      const { data: msgs } = await supabase
+        .from("messages")
+        .select("conversation_id, content, direction, sent_by_ai, created_at")
+        .in("conversation_id", ids)
+        .order("created_at", { ascending: false })
+        .limit(ids.length * 2)
+
+      const lastMsgByConv: Record<string, Msg> = {}
+      for (const m of msgs ?? []) {
+        if (!lastMsgByConv[m.conversation_id]) lastMsgByConv[m.conversation_id] = m
+      }
+
+      setConversations(convs.map(c => ({ ...c, messages: lastMsgByConv[c.id] ? [lastMsgByConv[c.id]] : [] })) as Conv[])
     }
 
     // Fetch immediately on mount
