@@ -477,16 +477,16 @@ async function processWebhookMessage(body: any) {
   let aiReply: Awaited<ReturnType<typeof generateReply>>
   try {
     aiReply = await generateReply({ userMessage: textForAI, systemPrompt, conversationHistory: history })
-    console.log(`🤖 generateReply → reply="${aiReply.reply.substring(0, 100)}", product="${aiReply.productName}"`)
+    console.log(`🤖 generateReply → replies=${aiReply.replies.length}, product="${aiReply.productName}"`, aiReply.replies.map(r => r.substring(0, 80)))
   } catch (err) {
     console.error("❌ Error generando respuesta con IA:", err)
     await sendFallback()
     return
   }
 
-  let { reply, productName, leadNotes } = aiReply
+  let { replies, productName, leadNotes } = aiReply
   let sendLocation = aiReply.sendLocation
-  const handover = aiReply.handover || reply.toLowerCase().includes("dame un momento")
+  const handover = aiReply.handover || replies.some(r => r.toLowerCase().includes("dame un momento"))
 
   // Forzar ubicación en el primer mensaje que llega de un anuncio
   if (isNewConversation && adHeadline) sendLocation = true
@@ -615,25 +615,28 @@ async function processWebhookMessage(body: any) {
     }
   }
 
-  // Enviar texto de respuesta
-  if (reply) {
-    try {
-      const sent = await sendWhatsAppMessage({
-        to: from, message: reply,
-        phoneNumberId: whatsappConfig.phone_number_id!,
-        accessToken:   whatsappConfig.access_token!,
-      })
-      await supabase.from("messages").insert({
-        conversation_id:     conversationId,
-        content:             reply,
-        direction:           "outbound",
-        sent_by_ai:          true,
-        whatsapp_message_id: sent?.messages?.[0]?.id ?? null,
-      })
-      console.log(`🤖 Respuesta enviada a ${from}: "${reply}"`)
-    } catch (err) {
-      console.error("❌ Error enviando texto:", err)
-      await sendFallback()
+  // Enviar mensajes de texto de respuesta (uno por uno)
+  if (replies.length > 0) {
+    for (const msg of replies) {
+      try {
+        const sent = await sendWhatsAppMessage({
+          to: from, message: msg,
+          phoneNumberId: whatsappConfig.phone_number_id!,
+          accessToken:   whatsappConfig.access_token!,
+        })
+        await supabase.from("messages").insert({
+          conversation_id:     conversationId,
+          content:             msg,
+          direction:           "outbound",
+          sent_by_ai:          true,
+          whatsapp_message_id: sent?.messages?.[0]?.id ?? null,
+        })
+        console.log(`🤖 Mensaje enviado a ${from}: "${msg}"`)
+      } catch (err) {
+        console.error("❌ Error enviando texto:", err)
+        await sendFallback()
+        break
+      }
     }
   } else if (!productName && !sendLocation && !handover) {
     await sendFallback()
