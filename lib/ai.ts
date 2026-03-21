@@ -56,7 +56,7 @@ Reglas:
   4. NUNCA listes especificaciones técnicas (mAh, watts, puertos, RAM, etc.) a menos que el cliente las pida explícitamente.
 - product_name: SOLO si el cliente explícitamente pide ver una foto, imagen o picture de un producto (ej: "¿me puedes mandar una foto?", "¿tiene foto?", "mándame la imagen"), escribe el nombre exacto del modelo como aparece en los datos (ej: "Samsung Galaxy A07"). En cualquier otro caso pon null — NO envíes imagen solo porque estás describiendo un producto. NO pongas URLs ni rutas de archivo.
 - send_location: pon true ÚNICAMENTE si el cliente pregunta por la dirección, ubicación o cómo llegar a la tienda. Pon false en todos los demás casos.
-- handover: el flujo de cierre es: (1) cuando el cliente confirme que quiere el producto, pídele su nombre. (2) Cuando el cliente responda con su nombre, responde SOLO con ["Dame un momento ⏳"] y pon handover en true. NUNCA preguntes método de pago ni si el envío es dentro o fuera de San Pedro — eso lo maneja el equipo. También pon true si el cliente pide hablar con un humano o expresa frustración repetida. Pon false en todos los demás casos.
+- handover: pon true cuando el cliente indique su método de pago (ej: "transferencia", "efectivo", "transfer", "cash"). En ese caso responde SOLO con ["Dame un momento ⏳"] y pon handover en true. También pon true si el cliente pide hablar con un humano o expresa frustración repetida. Pon false en todos los demás casos.
 - lead_notes: si en este mensaje el cliente reveló información relevante (nombre, producto de interés, presupuesto, zona, urgencia, contexto de compra), escribe un resumen breve en español de máximo 2 oraciones. Si no hay información nueva relevante, pon null.`
 
 export type AIReply = {
