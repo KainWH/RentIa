@@ -544,24 +544,34 @@ async function processWebhookMessage(body: any) {
       from,
       leadNotes ? `Detalle: ${leadNotes}` : "Sin detalles adicionales",
     ]
-    const results = await Promise.allSettled(
-      ALERT_NUMBERS.map((num) =>
-        sendWhatsAppTemplate({
+    const fallbackText = `🛒 *Pedido confirmado*\n\nCliente: *${clientName}*\nTeléfono: ${from}${orderDetail}\n\n👉 Coordina el pago y la entrega.`
+
+    for (const num of ALERT_NUMBERS) {
+      try {
+        await sendWhatsAppTemplate({
           to:            num,
           templateName:  "pedido_confirmado",
           parameters:    templateParams,
           phoneNumberId: whatsappConfig.phone_number_id!,
           accessToken:   whatsappConfig.access_token!,
         })
-      )
-    )
-    results.forEach((result, i) => {
-      if (result.status === "fulfilled") {
-        console.log(`📲 Alerta enviada a ${ALERT_NUMBERS[i]}`)
-      } else {
-        console.error(`❌ Error enviando alerta a ${ALERT_NUMBERS[i]}:`, result.reason?.message ?? result.reason)
+        console.log(`📲 Alerta (template) enviada a ${num}`)
+      } catch (templateErr: any) {
+        console.error(`❌ Template falló para ${num}:`, JSON.stringify(templateErr?.message ?? templateErr))
+        // Fallback: texto directo
+        try {
+          await sendWhatsAppMessage({
+            to:            num,
+            message:       fallbackText,
+            phoneNumberId: whatsappConfig.phone_number_id!,
+            accessToken:   whatsappConfig.access_token!,
+          })
+          console.log(`📲 Alerta (texto fallback) enviada a ${num}`)
+        } catch (textErr: any) {
+          console.error(`❌ Fallback texto también falló para ${num}:`, JSON.stringify(textErr?.message ?? textErr))
+        }
       }
-    })
+    }
   }
 
   // Enviar ubicación si el AI lo indicó
