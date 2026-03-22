@@ -121,7 +121,7 @@ export default function RegisterPage() {
 
               {/* Dirección de la tienda */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] font-semibold text-[#a3aac4] uppercase tracking-widest">Dirección de tu tienda</label>
+                <label className="text-[11px] font-semibold text-[#a3aac4] uppercase tracking-widest">Dirección de empresa</label>
                 <div className="relative">
                   <MapPin size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#a3aac4]" />
                   <input type="text" placeholder="Ej: Av. Circunvalación #45, San Pedro de Macorís" value={storeAddress}
