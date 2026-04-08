@@ -522,6 +522,50 @@ async function processWebhookMessage(body: any) {
     }
   }
 
+  const notifyAdvisors = async (productName?: string | null, leadNotes?: string | null) => {
+    await supabase.from("conversations").update({ ai_paused: true }).eq("id", conversationId)
+    console.log(`🤝 Handover activado para conversación ${conversationId}`)
+
+    const { data: contactInfo } = await supabase
+      .from("contacts").select("name, phone").eq("id", contact.id).single()
+    const clientName  = contactInfo?.name ?? contactInfo?.phone ?? from
+    const orderDetail = leadNotes ? `\n\n📋 *Detalle:* ${leadNotes}` : ""
+
+    const ALERT_NUMBERS  = aiConfig?.alert_numbers?.length ? aiConfig.alert_numbers : []
+    const templateParams = [
+      clientName,
+      from,
+      productName ? `El cliente está solicitando: ${productName}` : leadNotes ? `Detalle: ${leadNotes}` : "Sin detalles adicionales",
+    ]
+    const fallbackText = `🛒 *Pedido confirmado*\n\nCliente: *${clientName}*\nTeléfono: ${from}${orderDetail}\n\n👉 Coordina el pago y la entrega.`
+
+    for (const num of ALERT_NUMBERS) {
+      try {
+        await sendWhatsAppTemplate({
+          to:            num,
+          templateName:  aiConfig?.handover_template ?? "confirmacin_de_pedido",
+          parameters:    templateParams,
+          phoneNumberId: whatsappConfig.phone_number_id!,
+          accessToken:   whatsappConfig.access_token!,
+        })
+        console.log(`📲 Alerta (template) enviada a ${num}`)
+      } catch (templateErr: any) {
+        console.error(`❌ Template falló para ${num} — error Meta:`, templateErr?.message ?? templateErr)
+        try {
+          await sendWhatsAppMessage({
+            to:            num,
+            message:       fallbackText,
+            phoneNumberId: whatsappConfig.phone_number_id!,
+            accessToken:   whatsappConfig.access_token!,
+          })
+          console.log(`📲 Alerta (texto fallback) enviada a ${num}`)
+        } catch (textErr: any) {
+          console.error(`❌ Fallback texto también falló para ${num} — error Meta:`, textErr?.message ?? textErr)
+        }
+      }
+    }
+  }
+
   // Generar respuesta con Gemini
   // Enviar saludo fijo en conversaciones nuevas
   if (isNewConversation) {
@@ -553,6 +597,7 @@ async function processWebhookMessage(body: any) {
   } catch (err) {
     console.error("❌ Error generando respuesta con IA:", err)
     await sendFallback()
+    await notifyAdvisors()
     return
   }
 
@@ -577,49 +622,7 @@ async function processWebhookMessage(body: any) {
 
   // Handover: pausar IA y notificar asesores
   if (handover) {
-    await supabase.from("conversations").update({ ai_paused: true }).eq("id", conversationId)
-    console.log(`🤝 Handover activado para conversación ${conversationId}`)
-
-    const { data: contactInfo } = await supabase
-      .from("contacts").select("name, phone").eq("id", contact.id).single()
-    const clientName  = contactInfo?.name ?? contactInfo?.phone ?? from
-    const orderDetail = leadNotes ? `\n\n📋 *Detalle:* ${leadNotes}` : ""
-    const alertMsg    = `🛒 *Pedido confirmado*\n\nCliente: *${clientName}*\nTeléfono: ${from}${orderDetail}\n\n👉 Coordina el pago y la entrega.`
-
-    const ALERT_NUMBERS  = aiConfig?.alert_numbers?.length ? aiConfig.alert_numbers : []
-    const templateParams = [
-      clientName,
-      from,
-      productName ? `El cliente está solicitando: ${productName}` : leadNotes ? `Detalle: ${leadNotes}` : "Sin detalles adicionales",
-    ]
-    const fallbackText = `🛒 *Pedido confirmado*\n\nCliente: *${clientName}*\nTeléfono: ${from}${orderDetail}\n\n👉 Coordina el pago y la entrega.`
-
-    for (const num of ALERT_NUMBERS) {
-      try {
-        await sendWhatsAppTemplate({
-          to:            num,
-          templateName:  aiConfig?.handover_template ?? "confirmacin_de_pedido",
-          parameters:    templateParams,
-          phoneNumberId: whatsappConfig.phone_number_id!,
-          accessToken:   whatsappConfig.access_token!,
-        })
-        console.log(`📲 Alerta (template) enviada a ${num}`)
-      } catch (templateErr: any) {
-        console.error(`❌ Template falló para ${num} — error Meta:`, templateErr?.message ?? templateErr)
-        // Fallback: texto directo
-        try {
-          await sendWhatsAppMessage({
-            to:            num,
-            message:       fallbackText,
-            phoneNumberId: whatsappConfig.phone_number_id!,
-            accessToken:   whatsappConfig.access_token!,
-          })
-          console.log(`📲 Alerta (texto fallback) enviada a ${num}`)
-        } catch (textErr: any) {
-          console.error(`❌ Fallback texto también falló para ${num} — error Meta:`, textErr?.message ?? textErr)
-        }
-      }
-    }
+    await notifyAdvisors(productName, leadNotes)
   }
 
   // Enviar ubicación si el AI lo indicó
