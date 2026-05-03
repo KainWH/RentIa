@@ -1,6 +1,6 @@
 // Funciones de IA — Google Gemini vía @google/genai SDK
 
-import { GoogleGenAI } from "@google/genai"
+import { GoogleGenAI, Type } from "@google/genai"
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
 
@@ -88,7 +88,23 @@ export async function generateReply({
   const response = await ai.models.generateContent({
     model:    "gemini-2.5-flash",
     contents,
-    config: { systemInstruction: systemPrompt + JSON_FORMAT_INSTRUCTION },
+    config: {
+      systemInstruction: systemPrompt + JSON_FORMAT_INSTRUCTION,
+      // Forzar JSON estructurado — evita que el modelo se auto-anide o devuelva markdown
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          reply:         { type: Type.ARRAY, items: { type: Type.STRING } },
+          product_name:  { type: Type.STRING, nullable: true },
+          send_location: { type: Type.BOOLEAN },
+          handover:      { type: Type.BOOLEAN },
+          lead_notes:    { type: Type.STRING, nullable: true },
+        },
+        required: ["reply", "product_name", "send_location", "handover", "lead_notes"],
+        propertyOrdering: ["reply", "product_name", "send_location", "handover", "lead_notes"],
+      },
+    },
   })
 
   const raw = response.text?.trim() ?? ""
