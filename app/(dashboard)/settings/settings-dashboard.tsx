@@ -5,7 +5,7 @@ import {
   MessageSquare, Store, Shield, CreditCard,
   CheckCircle2, Eye, EyeOff, Phone, Globe,
   Lock, AlertCircle, ChevronRight, RefreshCw,
-  ShieldCheck, Star, ExternalLink, Copy, Check, Bot,
+  ShieldCheck, Star, ExternalLink, Copy, Check, Bot, Clock,
 } from "lucide-react"
 import type { WhatsappConfig, AiConfig } from "@/types"
 import AiForm from "./ai-form"
@@ -15,9 +15,10 @@ import AiForm from "./ai-form"
 type Tab = "whatsapp" | "negocio" | "ia" | "seguridad" | "facturacion"
 
 type Props = {
-  whatsappConfig: WhatsappConfig | null
-  tenantName:     string
-  aiConfig:       AiConfig | null
+  whatsappConfig:      WhatsappConfig | null
+  tenantName:          string
+  tenantBusinessHours: string
+  aiConfig:            AiConfig | null
 }
 
 // ── Shared styles ──────────────────────────────────────────────────────────────
@@ -355,19 +356,20 @@ const SECTORS = [
   "Otro",
 ]
 
-function NegocioSection({ tenantName }: { tenantName: string }) {
-  const [nombre,  setNombre]  = useState(tenantName)
-  const [sector,  setSector]  = useState("Selecciona un sector")
-  const [website, setWebsite] = useState("")
-  const [status,  setStatus]  = useState<"idle" | "loading" | "success" | "error">("idle")
-  const [errorMsg, setErrorMsg] = useState("")
+function NegocioSection({ tenantName, tenantBusinessHours }: { tenantName: string; tenantBusinessHours: string }) {
+  const [nombre,        setNombre]        = useState(tenantName)
+  const [sector,        setSector]        = useState("Selecciona un sector")
+  const [website,       setWebsite]       = useState("")
+  const [businessHours, setBusinessHours] = useState(tenantBusinessHours)
+  const [status,        setStatus]        = useState<"idle" | "loading" | "success" | "error">("idle")
+  const [errorMsg,      setErrorMsg]      = useState("")
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setStatus("loading"); setErrorMsg("")
     const res  = await fetch("/api/settings/tenant", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: nombre }),
+      body: JSON.stringify({ name: nombre, business_hours: businessHours }),
     })
     const data = await res.json()
     if (data.error) { setErrorMsg(data.error); setStatus("error") }
@@ -423,6 +425,22 @@ function NegocioSection({ tenantName }: { tenantName: string }) {
           </div>
         </div>
 
+        {/* Horario de atención */}
+        <div>
+          <label className={labelCls}>Horario de Atención</label>
+          <p className="text-[11px] text-[#a3aac4] mb-2 flex items-center gap-1.5">
+            <Clock size={11} className="text-[#3a4460]" />
+            El asistente IA usará este horario para responder al cliente
+          </p>
+          <textarea
+            value={businessHours}
+            onChange={e => setBusinessHours(e.target.value)}
+            placeholder={"Lunes a Viernes: 9:00 AM - 6:00 PM\nSábado: 10:00 AM - 2:00 PM\nDomingo: Cerrado"}
+            rows={4}
+            className={`${inputCls} font-mono resize-y`}
+          />
+        </div>
+
         {/* Feedback */}
         {status === "success" && (
           <div className="flex items-center gap-2 rounded-xl bg-[#40C4FF]/8 border border-[#40C4FF]/25 px-4 py-3"
@@ -472,7 +490,7 @@ function ComingSoonSection({ icon: Icon, title, desc }: { icon: React.ElementTyp
 
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 
-export default function SettingsDashboard({ whatsappConfig, tenantName, aiConfig }: Props) {
+export default function SettingsDashboard({ whatsappConfig, tenantName, tenantBusinessHours, aiConfig }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("whatsapp")
 
   return (
@@ -552,7 +570,7 @@ export default function SettingsDashboard({ whatsappConfig, tenantName, aiConfig
         {/* ── Right content ── */}
         <div className="flex-1 min-w-0 rounded-2xl border border-[#1f2b49] p-5 sm:p-8" style={{ background: "#0a1628" }}>
           {activeTab === "whatsapp"    && <WhatsAppSection config={whatsappConfig} />}
-          {activeTab === "negocio"     && <NegocioSection  tenantName={tenantName} />}
+          {activeTab === "negocio"     && <NegocioSection  tenantName={tenantName} tenantBusinessHours={tenantBusinessHours} />}
           {activeTab === "ia"          && <AiForm config={aiConfig} />}
           {activeTab === "seguridad"   && (
             <ComingSoonSection icon={Shield}     title="Seguridad" desc="Gestión de contraseña y autenticación de dos factores" />

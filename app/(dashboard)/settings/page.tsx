@@ -12,7 +12,7 @@ export default async function SettingsPage() {
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("id, name")
+    .select("id, name, business_hours")
     .eq("owner_id", user.id)
     .single()
 
@@ -35,6 +35,7 @@ export default async function SettingsPage() {
     <SettingsDashboard
       whatsappConfig={whatsappConfig}
       tenantName={tenant.name ?? ""}
+      tenantBusinessHours={tenant.business_hours ?? ""}
       aiConfig={aiConfig}
     />
   )

@@ -133,14 +133,15 @@ async function processWebhookMessage(body: any) {
 
   const { data: tenantData } = await supabase
     .from("tenants")
-    .select("company, name, store_address, store_latitude, store_longitude")
+    .select("company, name, store_address, store_latitude, store_longitude, business_hours")
     .eq("id", tenantId)
     .single()
 
-  const companyName  = tenantData?.company || tenantData?.name || null
-  const storeAddress = tenantData?.store_address || process.env.STORE_ADDRESS || ""
-  const storeLat     = tenantData?.store_latitude  ? Number(tenantData.store_latitude)  : parseFloat(process.env.STORE_LATITUDE  ?? "0")
-  const storeLng     = tenantData?.store_longitude ? Number(tenantData.store_longitude) : parseFloat(process.env.STORE_LONGITUDE ?? "0")
+  const companyName   = tenantData?.company || tenantData?.name || null
+  const storeAddress  = tenantData?.store_address || process.env.STORE_ADDRESS || ""
+  const storeLat      = tenantData?.store_latitude  ? Number(tenantData.store_latitude)  : parseFloat(process.env.STORE_LATITUDE  ?? "0")
+  const storeLng      = tenantData?.store_longitude ? Number(tenantData.store_longitude) : parseFloat(process.env.STORE_LONGITUDE ?? "0")
+  const businessHours = tenantData?.business_hours?.trim() || null
 
   // ── Procesar contenido del mensaje ───────────────────────────────────────
   let textForAI   = message.text?.body ?? ""
@@ -588,9 +589,13 @@ async function processWebhookMessage(body: any) {
     ? `\n\nNOMBRE DE LA EMPRESA: Eres el asistente virtual de "${companyName}". Si el cliente envía un saludo (Hola, Hello, Hi, Buenos días, Buenas, etc.), responde SIEMPRE con exactamente: "Saludos, gracias por comunicarte con ${companyName}, ¿cómo puedo asistirte?" — sin agregar nada más en ese mensaje.`
     : ""
 
+  const hoursContext = businessHours
+    ? `\n\nHORARIO DE ATENCIÓN:\n${businessHours}\n\nSi el cliente pregunta por el horario, días, hora de apertura o cierre, o si están abiertos, responde basándote ÚNICAMENTE en este horario. NO inventes horarios que no estén aquí.`
+    : ""
+
   const systemPrompt = history.length > 0 || isNewConversation
-    ? `${basePrompt}${companyContext}${referralContext}\n\nIMPORTANTE: El saludo inicial ya fue enviado automáticamente. NO vuelvas a saludar. Continúa la conversación de forma natural.`
-    : `${basePrompt}${companyContext}${referralContext}`
+    ? `${basePrompt}${companyContext}${hoursContext}${referralContext}\n\nIMPORTANTE: El saludo inicial ya fue enviado automáticamente. NO vuelvas a saludar. Continúa la conversación de forma natural.`
+    : `${basePrompt}${companyContext}${hoursContext}${referralContext}`
 
   const sendFallback = async () => {
     const fallback = "En este momento tuve un inconveniente para responder. Vuelvo enseguida. 🙏"
